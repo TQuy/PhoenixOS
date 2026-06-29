@@ -18,8 +18,8 @@ import transformers
 import time
 from transformers import AutoTokenizer, AutoModelForCausalLM, TextStreamer
 
-# model = AutoModelForCausalLM.from_pretrained('/data/huggingface/hub/Llama-2-13b-chat-hf/').to('cuda:0')
-tokenizer = AutoTokenizer.from_pretrained('/data/huggingface/hub/Llama-2-13b-chat-hf/')
+tokenizer_path = './tokenizer'
+tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
 
 print(f"process id: {os.getpid()}")
 

@@ -20,8 +20,11 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, TextStreamer
 
 coldstart_start_time = time.time()
 
-model = AutoModelForCausalLM.from_pretrained('/data/huggingface/hub/Llama-2-13b-chat-hf/')
-tokenizer = AutoTokenizer.from_pretrained('/data/huggingface/hub/Llama-2-13b-chat-hf/')
+model_path = './model'
+tokenizer_path = './tokenizer'
+
+model = AutoModelForCausalLM.from_pretrained(model_path)
+tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
 
 # fp16
 # model = model.half()

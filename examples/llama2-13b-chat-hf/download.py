@@ -18,22 +18,27 @@ from huggingface_hub import login
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 hf_token = os.getenv('HF_TOKEN')
+if hf_token is None:
+    raise RuntimeError(
+        'HF_TOKEN is not set. Export a Hugging Face read token that has access '
+        'to the gated Llama 2 repository before running this script.'
+    )
 login(token = hf_token)
 
-model_id = 'meta-llama/Llama-2-7b-chat-hf'
+model_id = 'meta-llama/Llama-2-13b-chat-hf'
 model_path = './model'
 tokenizer_path = './tokenizer'
 
 # download model parameter
 if not os.path.exists(model_path):
     os.makedirs(model_path)
-model = AutoModelForCausalLM.from_pretrained(model_id, device_map='auto')
+model = AutoModelForCausalLM.from_pretrained(model_id, device_map='auto', use_auth_token=hf_token)
 model.save_pretrained(model_path)
 
 # download tokenizer parameter
 if not os.path.exists(tokenizer_path):
-    os.makedirs(model_path)
-tokenizer = AutoTokenizer.from_pretrained(model_id)
+    os.makedirs(tokenizer_path)
+tokenizer = AutoTokenizer.from_pretrained(model_id, use_auth_token=hf_token)
 tokenizer.save_pretrained(tokenizer_path)
 
 exit(0)

@@ -14,8 +14,8 @@
 
 import os
 import transformers
-from huggingface_hub import login
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from huggingface_hub import login, snapshot_download
+from transformers import AutoTokenizer
 
 hf_token = os.getenv('HF_TOKEN')
 if hf_token is None:
@@ -30,10 +30,12 @@ model_path = './model'
 tokenizer_path = './tokenizer'
 
 # download model parameter
-if not os.path.exists(model_path):
-    os.makedirs(model_path)
-model = AutoModelForCausalLM.from_pretrained(model_id, device_map='auto', use_auth_token=hf_token)
-model.save_pretrained(model_path)
+snapshot_download(
+    repo_id=model_id,
+    local_dir=model_path,
+    token=hf_token,
+    local_dir_use_symlinks=False,
+)
 
 # download tokenizer parameter
 if not os.path.exists(tokenizer_path):

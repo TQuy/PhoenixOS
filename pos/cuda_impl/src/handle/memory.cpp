@@ -14,8 +14,13 @@
  * limitations under the License.
  */
 
+#include <chrono>
 #include <iostream>
 #include <map>
+
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <unistd.h>
 
 #include <cuda.h>
 #include <cuda_runtime_api.h>
@@ -26,6 +31,47 @@
 #include "pos/cuda_impl/handle.h"
 #include "pos/cuda_impl/handle/memory.h"
 #include "pos/cuda_impl/proto/memory.pb.h"
+
+
+namespace {
+
+const char *kPOSMemoryTimingShmPath = "/dev/shm/cr/pos_log";
+
+struct POSMemoryTimingLog {
+    volatile size_t tot_ckpt_size;
+    volatile double tot_ckpt_time;
+    volatile double ckpt_memcpy_time;
+    volatile size_t tot_restore_size;
+    volatile double tot_restore_time;
+    volatile double restore_memcpy_time;
+};
+
+POSMemoryTimingLog* get_pos_memory_timing_log(){
+    static bool initialized = false;
+    static POSMemoryTimingLog *log = nullptr;
+
+    if(initialized){ return log; }
+    initialized = true;
+
+    int fd = open(kPOSMemoryTimingShmPath, O_RDWR);
+    if(fd < 0){ return nullptr; }
+
+    void *mapped = mmap(
+        /* addr */ nullptr,
+        /* length */ sizeof(POSMemoryTimingLog),
+        /* prot */ PROT_READ | PROT_WRITE,
+        /* flags */ MAP_SHARED,
+        /* fd */ fd,
+        /* offset */ 0
+    );
+    close(fd);
+
+    if(mapped == MAP_FAILED){ return nullptr; }
+    log = reinterpret_cast<POSMemoryTimingLog*>(mapped);
+    return log;
+}
+
+}
 
 
 std::map<int, CUdeviceptr>  POSHandleManager_CUDA_Memory::alloc_ptrs;
@@ -189,6 +235,11 @@ pos_retval_t POSHandle_CUDA_Memory::__commit(
     pos_retval_t retval = POS_SUCCESS;
     cudaError_t cuda_rt_retval;
     POSCheckpointSlot *ckpt_slot, *cow_ckpt_slot;
+    POSMemoryTimingLog *timing_log = get_pos_memory_timing_log();
+    auto op_start = std::chrono::high_resolution_clock::now();
+    auto memcpy_start = op_start;
+    auto memcpy_end = op_start;
+    bool memcpy_timed = false;
     
     cudaSetDevice(0);
 
@@ -210,6 +261,7 @@ pos_retval_t POSHandle_CUDA_Memory::__commit(
 
     if(from_cache == false){
         // commit from origin buffer
+        if(timing_log != nullptr){ memcpy_start = std::chrono::high_resolution_clock::now(); }
         cuda_rt_retval = cudaMemcpyAsync(
             /* dst */ ckpt_slot->expose_pointer(), 
             /* src */ this->server_addr,
@@ -225,6 +277,7 @@ pos_retval_t POSHandle_CUDA_Memory::__commit(
             retval = POS_FAILED;
             goto exit;
         }
+        if(timing_log != nullptr){ timing_log->tot_ckpt_size = timing_log->tot_ckpt_size + this->state_size; }
     } else {
         // commit from cache buffer
         if(unlikely(POS_SUCCESS != (
@@ -238,6 +291,7 @@ pos_retval_t POSHandle_CUDA_Memory::__commit(
                 version_id, this->server_addr
             );
         }
+        if(timing_log != nullptr){ memcpy_start = std::chrono::high_resolution_clock::now(); }
         cuda_rt_retval = cudaMemcpyAsync(
             /* dst */ ckpt_slot->expose_pointer(), 
             /* src */ cow_ckpt_slot->expose_pointer(),
@@ -253,6 +307,7 @@ pos_retval_t POSHandle_CUDA_Memory::__commit(
             retval = POS_FAILED;
             goto exit;
         }
+        if(timing_log != nullptr){ timing_log->tot_ckpt_size = timing_log->tot_ckpt_size + this->state_size; }
     }
 
     if(is_sync){
@@ -265,12 +320,23 @@ pos_retval_t POSHandle_CUDA_Memory::__commit(
             retval = POS_FAILED;
             goto exit;
         }
+        if(timing_log != nullptr){
+            memcpy_end = std::chrono::high_resolution_clock::now();
+            memcpy_timed = true;
+        }
     }
 
     // persist the state after commit
     retval = this->__persist(ckpt_slot, ckpt_dir, stream_id);
 
 exit:
+    if(timing_log != nullptr){
+        auto op_end = std::chrono::high_resolution_clock::now();
+        timing_log->tot_ckpt_time = timing_log->tot_ckpt_time + std::chrono::duration<double>(op_end - op_start).count();
+        if(memcpy_timed){
+            timing_log->ckpt_memcpy_time = timing_log->ckpt_memcpy_time + std::chrono::duration<double>(memcpy_end - memcpy_start).count();
+        }
+    }
     return retval;
 }
 
@@ -401,6 +467,11 @@ pos_retval_t POSHandle_CUDA_Memory::__reload_state(void* mapped, uint64_t ckpt_f
     pos_retval_t retval = POS_SUCCESS;
     pos_protobuf::Bin_POSHandle_CUDA_Memory memory_binary;
     cudaError_t cuda_rt_retval;
+    POSMemoryTimingLog *timing_log = get_pos_memory_timing_log();
+    auto op_start = std::chrono::high_resolution_clock::now();
+    auto memcpy_start = op_start;
+    auto memcpy_end = op_start;
+    bool memcpy_timed = false;
 
     POS_CHECK_POINTER(mapped);
 
@@ -411,6 +482,7 @@ pos_retval_t POSHandle_CUDA_Memory::__reload_state(void* mapped, uint64_t ckpt_f
     }
     POS_CHECK_POINTER(memory_binary.mutable_base());
 
+    if(timing_log != nullptr){ memcpy_start = std::chrono::high_resolution_clock::now(); }
     cuda_rt_retval = cudaMemcpyAsync(
         /* dst */ this->server_addr,
         /* src */ reinterpret_cast<const void*>(memory_binary.mutable_base()->state().c_str()),
@@ -423,6 +495,7 @@ pos_retval_t POSHandle_CUDA_Memory::__reload_state(void* mapped, uint64_t ckpt_f
         retval = POS_FAILED;
         goto exit;
     }
+    if(timing_log != nullptr){ timing_log->tot_restore_size = timing_log->tot_restore_size + this->state_size; }
 
     cuda_rt_retval = cudaStreamSynchronize((cudaStream_t)(stream_id));
     if(unlikely(cuda_rt_retval != cudaSuccess)){
@@ -430,10 +503,21 @@ pos_retval_t POSHandle_CUDA_Memory::__reload_state(void* mapped, uint64_t ckpt_f
         retval = POS_FAILED;
         goto exit;
     }
+    if(timing_log != nullptr){
+        memcpy_end = std::chrono::high_resolution_clock::now();
+        memcpy_timed = true;
+    }
 
 exit:
     // this should be the end of using this mmap area, so we release it here
     munmap(mapped, ckpt_file_size);
+    if(timing_log != nullptr){
+        auto op_end = std::chrono::high_resolution_clock::now();
+        timing_log->tot_restore_time = timing_log->tot_restore_time + std::chrono::duration<double>(op_end - op_start).count();
+        if(memcpy_timed){
+            timing_log->restore_memcpy_time = timing_log->restore_memcpy_time + std::chrono::duration<double>(memcpy_end - memcpy_start).count();
+        }
+    }
     return retval;
 }
 

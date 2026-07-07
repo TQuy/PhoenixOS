@@ -17,6 +17,11 @@ bash build.sh -3 -i
 source /etc/profile
 ./pos_build -3 -i
 
+CUDA_CHECKPOINT_BIN=/root/third_party/cuda-checkpoint/bin/x86_64_Linux/cuda-checkpoint
+if [ -x "$CUDA_CHECKPOINT_BIN" ]; then
+    ln -sf "$CUDA_CHECKPOINT_BIN" /usr/local/bin/cuda-checkpoint
+fi
+
 python3 -m pip install --no-cache-dir psutil pynvml tqdm
 
 if ! python3 - <<'PY'
@@ -30,5 +35,6 @@ source /etc/profile
 
 echo "Build complete. Next:"
 echo "  cd /root/examples/resnet-reproduction"
-echo "  python3 runner.py --preflight-only"
+echo "  python3 runner.py --method phos --preflight-only"
+echo "  python3 runner.py --method cuda --preflight-only"
 echo "  bash run_once.sh"

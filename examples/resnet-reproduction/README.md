@@ -83,9 +83,23 @@ METHOD=phos bash run_once.sh
 METHOD=cuda bash run_once.sh
 METHOD=cuda-gpu bash run_once.sh
 SKIP_RESTORE=1 bash run_once.sh
+bash run_once.sh --plot total
+bash run_once.sh --plot gpu
+bash run_once.sh --plot gpu-cr
+bash run_once.sh --plot both
+bash run_once.sh --plot all
 ```
 
 `SKIP_RESTORE=1` is useful when debugging checkpoint-only failures. The default comparison includes restore.
+`METHOD=cuda-gpu` collects the GPU-only cuda-checkpoint path used by `compare.py --plot-gpu`.
+
+The plot shortcuts automatically run the methods needed by the plot:
+
+- `--plot total`: runs PhOS and full cuda-checkpoint+CRIU, then writes `comparison.svg`.
+- `--plot gpu`: runs PhOS and GPU-only cuda-checkpoint, then writes a checkpoint-only Figure 11-style `comparison_gpu.svg`.
+- `--plot gpu-cr`: runs PhOS and GPU-only cuda-checkpoint, then writes the older checkpoint+restore `comparison_gpu_cr.svg`.
+- `--plot both`: runs PhOS, full cuda-checkpoint+CRIU, and GPU-only cuda-checkpoint, then writes `comparison.svg` and `comparison_gpu.svg`.
+- `--plot all`: writes total, GPU checkpoint-only, and GPU checkpoint+restore SVGs.
 
 ## Output
 
@@ -101,7 +115,14 @@ Run the analyzer directly with:
 ```bash
 python3 analyze.py ./log/moti-ckpt/phos-trans-resnet --strict
 python3 analyze.py ./log/moti-ckpt/cuda-trans-resnet --method cuda --strict
+python3 analyze.py ./log/moti-ckpt/cuda-gpu-trans-resnet --method cuda-gpu
 python3 compare.py --csv > comparison.csv
 python3 compare.py --plot
 python3 compare.py --plot-gpu
+python3 compare.py --plot-gpu-cr
+python3 compare.py --plot-mode total
+python3 compare.py --plot-mode gpu
+python3 compare.py --plot-mode gpu-cr
+python3 compare.py --plot-mode both
+python3 compare.py --plot-mode all
 ```

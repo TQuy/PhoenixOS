@@ -55,6 +55,163 @@
 
 <br />
 
+## Quick Start: Run PhoenixOS
+
+Use this runbook when you want to build PhOS and reproduce a measured checkpoint/restore run. The verified target on this branch is the ResNet reproduction harness.
+
+| Step | Where | Script or command | Purpose |
+| --- | --- | --- | --- |
+| 1 | Host | `bash examples/resnet-reproduction/run_container.sh` | Start the privileged CUDA 11.3 container. |
+| 2 | Host | `sudo docker exec -it phos_resnet_repro /bin/bash` | Enter the container. |
+| 3 | Container | `bash /root/examples/resnet-reproduction/build_inside_container.sh` | Download assets, build PhOS, install PhOS, and install Python dependencies. |
+| 4 | Container | `python3 runner.py --method phos --preflight-only` | Check PhOS runtime prerequisites. |
+| 5 | Container | `python3 runner.py --method cuda --preflight-only` | Check `cuda-checkpoint` plus CRIU prerequisites. |
+| 6 | Container | `bash run_once.sh --plot total` | Run PhOS and cuda-checkpoint total CPU+GPU checkpoint/restore comparison. |
+| 7 | Container | `bash run_once.sh --plot gpu-cr` | Run GPU-only checkpoint/restore comparison. |
+| 8 | Container | `bash run_once.sh --plot gpu` | Run GPU checkpoint-only comparison. |
+
+### 1. Start and Enter the Container
+
+From the repository root on the host:
+
+```bash
+cd /home/quynt/PhoenixOS
+bash examples/resnet-reproduction/run_container.sh
+sudo docker exec -it phos_resnet_repro /bin/bash
+```
+
+The container helper runs Docker with GPU access, host IPC/network, privileged mode, and mounts the repository at `/root`.
+
+### 2. Build and Install PhOS
+
+Inside the container:
+
+```bash
+bash /root/examples/resnet-reproduction/build_inside_container.sh
+```
+
+The helper script runs the full build flow:
+
+```bash
+apt-get update
+apt-get install -y git wget python3-pip
+cd /root/scripts/build_scripts
+bash download_assets.sh
+bash build.sh -c -3
+bash build.sh -3 -i
+source /etc/profile
+./pos_build -3 -i
+source /etc/profile
+```
+
+### 3. Run Preflight Checks
+
+Inside the container:
+
+```bash
+cd /root/examples/resnet-reproduction
+python3 runner.py --method phos --preflight-only
+python3 runner.py --method cuda --preflight-only
+python3 runner.py --method cuda-gpu --preflight-only
+```
+
+Each command should print JSON with `"ok": true`.
+
+### 4. Run the ResNet Comparison
+
+Total checkpoint/restore latency, including CPU and GPU:
+
+```bash
+cd /root/examples/resnet-reproduction
+bash run_once.sh --plot total
+```
+
+Output:
+
+```text
+examples/resnet-reproduction/comparison.svg
+```
+
+GPU-only checkpoint/restore latency:
+
+```bash
+bash run_once.sh --plot gpu-cr
+```
+
+Output:
+
+```text
+examples/resnet-reproduction/comparison_gpu_cr.svg
+```
+
+GPU checkpoint-only latency:
+
+```bash
+bash run_once.sh --plot gpu
+```
+
+Output:
+
+```text
+examples/resnet-reproduction/comparison_gpu.svg
+```
+
+### 5. Analyze Existing Logs
+
+```bash
+cd /root/examples/resnet-reproduction
+python3 analyze.py ./log/moti-ckpt/phos-trans-resnet --method phos
+python3 analyze.py ./log/moti-ckpt/cuda-trans-resnet --method cuda
+python3 analyze.py ./log/moti-ckpt/cuda-gpu-trans-resnet --method cuda-gpu
+python3 compare.py --plot-mode total
+python3 compare.py --plot-mode gpu-cr
+python3 compare.py --plot-mode gpu
+```
+
+Logs are written under:
+
+```text
+examples/resnet-reproduction/log/moti-ckpt/phos-trans-resnet
+examples/resnet-reproduction/log/moti-ckpt/cuda-trans-resnet
+examples/resnet-reproduction/log/moti-ckpt/cuda-gpu-trans-resnet
+```
+
+### 6. Manual PhOS C/R Commands
+
+For a manual run, create a `pos.yaml` in the workload directory:
+
+```yaml
+job_name: "my-phos-job"
+daemon_addr: "127.0.0.1"
+```
+
+Then run:
+
+```bash
+pos_cli --start --target daemon
+env $phos python3 train.py
+mkdir -p /root/ckpt
+pos_cli --dump --dir /root/ckpt --pid <application-pid>
+pos_cli --restore --dir /root/ckpt
+```
+
+### Optional: LLaMA-2 7B Harness
+
+The LLaMA-2 7B harness is in `examples/llama2-7b-reproduction`.
+
+```bash
+cd /root/examples/llama2-7b-reproduction
+bash build_inside_container.sh
+export HF_TOKEN=<your-token>
+python3 download_model.py --output ./model
+bash run_once.sh --method cuda-gpu --skip-warmup --freq 1 --local-files-only
+bash run_once.sh --method cuda --skip-warmup --freq 1 --local-files-only
+```
+
+Current status on this branch: the plain LLaMA workload and cuda-checkpoint paths run, but the PhOS path exits before the first checkpoint request because the current PhOS/Cricket cuBLAS remoting layer does not fully support the LLaMA/PyTorch GEMM path. Use ResNet as the verified PhOS reproduction target.
+
+<br />
+
 ## I. Build and Install PhOS
 
 ### 💡 Option 1: Build and Install From Source
@@ -164,6 +321,11 @@
     #   -3: the build process involves all third-parties
     #   -i: install after successful building
     bash build.sh -3 -i
+
+    # refresh environment and install generated PhOS runtime pieces
+    source /etc/profile
+    ./pos_build -3 -i
+    source /etc/profile
     ```
 
     For customizing build options, please refers to and modify avaiable options under `scripts/build_scripts/build_config.yaml`.

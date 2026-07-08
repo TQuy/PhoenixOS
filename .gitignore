@@ -20,7 +20,8 @@
 **/*.nsys-rep
 **/*.bat
 **/.gitconfig
-
+**/log
+**/model
 **/__pycache__
 
 **/.cargo
